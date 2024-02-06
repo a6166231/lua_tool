@@ -81,36 +81,31 @@ function wxFindAllChildrenWithType(parent, type)
 end
 
 function wxCheckDrawEnable(node) 
-    if node and node.ignore then 
-        return false
-    end
     if not CheckNodeVaild(node) then 
         return false
     end
 
-    if tolua.iskindof(node, "cc.Sprite") then 
-        return true 
-    end
-    if tolua.iskindof(node, "cc.Label") then 
-        return true 
-    end
-    if tolua.iskindof(node, "ccui.Button") then 
-        return true 
-    end
-    if tolua.iskindof(node, "ccui.ImageView") then 
-        return true 
-    end
-    if tolua.iskindof(node, "ccui.Text") then 
-        return true 
-    end
-    
-    if not node.getTexture  or not node.getTexture() then 
-        return false
-    end
-
-    if node.getRenderFile and node:getRenderFile() then 
-        return true
-    end
+    local contentSize = node : getContentSize()
+    if contentSize.width > 0 and contentSize.height > 0 then
+        if tolua.iskindof(node, "ccui.Layout") then 
+            return false 
+        end
+        if tolua.iskindof(node, "cc.Sprite") then 
+            return true 
+        end
+        if tolua.iskindof(node, "cc.Label") then 
+            return true 
+        end
+        if tolua.iskindof(node, "ccui.Button") then 
+            return true 
+        end
+        if tolua.iskindof(node, "ccui.ImageView") then 
+            return true 
+        end
+        if tolua.iskindof(node, "ccui.Text") then 
+            return true 
+        end
+    end 
     return false     
 end
 
@@ -257,8 +252,6 @@ function wxGetNodeWorldContentSize(rectNode)
     end 
     return {width = contentSize.width * scaleX, height = contentSize.height * scaleY}
 end
-
-
 
 cc = cc or {}
 cc.p =

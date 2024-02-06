@@ -1,10 +1,51 @@
 local wxGUI = require "stab.scripts.init.wxGUI"
+local wxOperatorStack = require "stab.scripts.init.wxOperatorStack"
+
 local wxNodePanel = class("wxNodePanel")
 
 local DEFAULT_TEXT_WIDTH = 150
 local DEFAULT_FUNCTION_WIDTH = 110
 local DEFAULT_FUNCTION_HEIGHT = 30
 local DEFAULT_CAMERA_FLAG = 1
+
+-- 示例操作类定义
+local Operation = {}
+Operation.new = function(this, node , data , oldValue,newValue)
+    local op = {}
+    op.node = node 
+    --当前执行
+    op.redo = function()
+        print("redooooo")
+        if data.set then            
+            if node and not tolua.isnull(node) then
+                if newValue or newValue == false then
+                    node[data.set](node, newValue)
+                end                                        
+            end
+        else 
+            if data.callBack then 
+                data.callBack(this,newValue)
+            end
+        end
+    end
+    
+    --回撤方法
+    op.undo = function()
+        print("undooooo")
+        if data.set then            
+            if node and not tolua.isnull(node) then
+                if oldValue or oldValue == false then
+                    node[data.set](node, oldValue)                       
+                end                           
+            end            
+        else 
+            if data.callBack then 
+                data.callBack(this,oldValue)         
+            end
+        end
+    end
+    return op
+end
 
 local TITLE = 
 {
@@ -29,7 +70,8 @@ local TITLE =
             return b and true or false
         end,
         force = true ,
-        space = {x = 20, y = 0}
+        space = {x = 20, y = 0},
+        ignoreOperatorStack = true ,
     },
     {
         type = wxGUI.ComponentType.CHECKBOX,
@@ -58,7 +100,8 @@ local TITLE =
             return b and true or false
         end,
         force = true ,
-        space = {x = 100, y = 0}
+        space = {x = 100, y = 0},
+        ignoreOperatorStack = true ,
     },
     {
         type = wxGUI.ComponentType.EDITBOX,
@@ -70,8 +113,10 @@ local TITLE =
         end,
         callBack = function(self,value)
             local director = cc.Director:getInstance() 
-            value = value or 1 --容错
-            value = (value < 0 ) and 0 or value--防止小于0     
+            if not value then 
+                return 
+            end
+            value = (value < 0 ) and 0 or value--防止小于0              
             director:getScheduler():setTimeScale(value)          
         end,
         transDataFromWx = function(value)
@@ -86,6 +131,28 @@ local TITLE =
         space = {x = 100, y = 0}
     },
 
+    {
+        type = wxGUI.ComponentType.BUTTON,
+        text = UTF8TowxString("撤回"),      
+        width = 50,
+        callBack = function(self)
+            self.wxOperatorStack:undo()
+        end,      
+        force = true,
+        space = {x = DEFAULT_FUNCTION_WIDTH , y = 0},
+        ignoreOperatorStack = true ,
+    },    
+    {
+        type = wxGUI.ComponentType.BUTTON,
+        text = UTF8TowxString("还原"),   
+        width = 50,   
+        callBack = function(self)
+            self.wxOperatorStack:redo()
+        end,      
+        force = true,
+        space = {x = DEFAULT_FUNCTION_WIDTH - 50, y = 0},
+        ignoreOperatorStack = true ,
+    },
 }
 local layoutTable = {
     children = {
@@ -120,7 +187,8 @@ local layoutTable = {
             end,
             text = "draw",
             force = true,
-            space = {x = DEFAULT_FUNCTION_WIDTH, y = 0}
+            space = {x = DEFAULT_FUNCTION_WIDTH, y = 0},
+            ignoreOperatorStack = true ,
         },
         {
             type = wxGUI.ComponentType.BUTTON,
@@ -129,7 +197,8 @@ local layoutTable = {
             end,
             text = "output",
             force = true,
-            space = {x = 120, y = 0}
+            space = {x = 120, y = 0},
+            ignoreOperatorStack = true ,
         },
         {
             type = wxGUI.ComponentType.EDITBOX,
@@ -379,6 +448,7 @@ function wxNodePanel:init(data)
     self.mapLastValue = {}
     self.frame = data.frame   
     self.touthEnable = false
+    self.EnableMoveNode = false
     self.nodePanel = wxGUI:wxScrolledWindow(self.frame, data.width, data.height)
     self.title = wxGUI:wxScrolledWindow(self.nodePanel,data.width, data.height)
     self.panel = wxGUI:wxScrolledWindow(self.nodePanel,data.width, data.height)
@@ -390,7 +460,8 @@ function wxNodePanel:init(data)
     self.layout:Add(self.title)
     self.layout:Add(self.panel,0, wxOr(wx.wxEXPAND, wx.wxALL))
     self.layout:AddGrowableRow(1, 1)
-    self.layout:AddGrowableCol(0, 0)    
+    self.layout:AddGrowableCol(0, 0)  
+    self.wxOperatorStack = wxOperatorStack.create()
     return true
 end
 
@@ -415,15 +486,51 @@ function wxNodePanel:createTouchPanel()
 end
 
 function wxNodePanel:initTouchEvent()
+    local basePosX , basePosY,baseOpacity , rectNodeX , rectNodeY
     local function ontouch(sender, event)
         if self.touthEnable then
             if event == ccui.TouchEventType.began then
-                if CheckNodeVaild(self.touchNode) then 
-                    self.touthEnable = false
-                    self.callBack(self.touchNode)           
+                if CheckNodeVaild(self.touchNode) then                     
+                    self.EnableMoveNode = true 
+                    self.callBack(self.touchNode)   
+                    basePosX = self.touchNode:getPositionX()        
+                    basePosY = self.touchNode:getPositionY()
+                    rectNodeX = self.touchNodeRect:getPositionX()
+                    rectNodeY = self.touchNodeRect:getPositionY()
+                    baseOpacity = self.touchNode:getOpacity()
                     return true
                 end
-            end
+            elseif event == ccui.TouchEventType.moved then
+                local sPos = sender:getTouchBeganPosition()
+                local ePos = sender:getTouchMovePosition()
+                local x = ePos.x - sPos.x
+                local y = ePos.y - sPos.y
+                local updateMovePos = function (node , x, y,beginX,beginY)
+                    local camera = self.cameras[node:getCameraMask()]
+                    local scaleX, scaleY = 1,1
+                    if camera then
+                        scaleX, scaleY = wxCalcCameraZoom( camera )
+                    end
+                    local worldTouchNodePos  = node:getParent():convertToWorldSpace(cc.p(beginX,beginY))
+                    worldTouchNodePos.x = worldTouchNodePos.x + x * scaleX
+                    worldTouchNodePos.y = worldTouchNodePos.y + y * scaleY
+                    local nodePositon = node:getParent():convertToNodeSpace(worldTouchNodePos)
+                    node:setPosition(nodePositon)
+                    node:setOpacity(150)
+                end
+                updateMovePos(self.touchNode,x, y,basePosX,basePosY)
+                updateMovePos(self.touchNodeRect,x, y,rectNodeX,rectNodeY)
+            elseif event == ccui.TouchEventType.ended then
+                self.touthEnable = false
+                self.EnableMoveNode = false 
+                self.touchNode:setOpacity(baseOpacity)
+                self.touchNodeRect:setOpacity(255)
+                local data = {
+                    set = "setPosition",                 
+                }
+                self.wxOperatorStack:pushOperation(Operation.new(self,self.touchNode,data,cc.p(basePosX,basePosY),cc.p(self.touchNode:getPosition())))
+                return true
+            end            
         end        
     end
     self.touchPanel:setTouchEnabled(true)
@@ -455,7 +562,9 @@ function wxNodePanel:touchMove(pos)
         self.moveInterval = true        
         wxDelayCall(self.touchPanel,
             function()
-                self:calculateChooseNode()
+                if not self.EnableMoveNode then 
+                    self:calculateChooseNode()                    
+                end
                 self.moveInterval = false
             end,
             0.1
@@ -514,7 +623,6 @@ function wxNodePanel:calculateTouchNode()
             local childrenCount  = #children
             for i = 0 , childrenCount-1 do
                 local child = children[childrenCount - i]
-                local name = GetNodeName(child)
                 if child:isVisible() and not child.ignore then     
                     if  self:CheckIsTouch(child) then                                        
                         touchNode = child                       
@@ -710,11 +818,22 @@ function wxNodePanel:createCommponent(data,panel)
                 self.sx = self.sx + DEFAULT_TEXT_WIDTH - 100
             end
         end
+        local getValue  = function(chooseNode)
+            if data.get and chooseNode and not tolua.isnull(chooseNode) then
+                return chooseNode[data.get] and chooseNode[data.get](chooseNode) or nil
+            end   
+            if data.getValue then
+                return data.getValue(self,chooseNode)
+            end         
+            return nil
+        end
+
         local component = nil
         local callback =
             handler(
                 self,
                 function(this, value)
+                    local oldValue = getValue(this.chooseNode)
                     if data.set then
                         local chooseNode = this.chooseNode
                         if chooseNode and not tolua.isnull(chooseNode) then
@@ -726,9 +845,13 @@ function wxNodePanel:createCommponent(data,panel)
                             end
                             if value or value == false then
                                 chooseNode[data.set](chooseNode, value)
-                            end                           
-                        end
-                        self.mapLastValue[panel][data] = value
+                                self.mapLastValue[panel][data] = value  
+                            end    
+                            if not data.ignoreOperatorStack then 
+                                self.wxOperatorStack:pushOperation(Operation.new(self,chooseNode,data,oldValue,value)) 
+                            end     
+                                                
+                        end                                          
                     else 
                         if data.callBack then 
                             if data.transDataFromWx then
@@ -736,21 +859,16 @@ function wxNodePanel:createCommponent(data,panel)
                             end
                             data.callBack(this,value)
                             self.mapLastValue[panel][data] = value
+                            if not data.ignoreOperatorStack then 
+                                self.wxOperatorStack:pushOperation(Operation.new(self,chooseNode,data,oldValue,value))
+                            end
                         end
-                    end  
+                    end
+                     
                 end
-            )            
-        local getValue  = function()
-            if data.get and self.chooseNode and not tolua.isnull(self.chooseNode) then
-                return self.chooseNode[data.get] and self.chooseNode[data.get](self.chooseNode) or nil
-            end   
-            if data.getValue then
-                return data.getValue(self,self.chooseNode)
-            end         
-            return nil
-        end
+            )           
 
-        local value = getValue()
+        local value = getValue(self.chooseNode)
         if data.transDataFromCocos then
             value = data.transDataFromCocos(value, self.chooseNode)
         end
@@ -821,7 +939,7 @@ function wxNodePanel:drawRect(rectNode,time)
     local drawNode = cc.DrawNode:create()
     drawNode.ignore = true
     self.touchPanel:addChild(drawNode) 
-    if CheckNodeVaild(rectNode) then   
+    if CheckNodeVaild(rectNode) then
         local camera = self.cameras[rectNode:getCameraMask()]
         local scaleX, scaleY = 1,1
         if camera then

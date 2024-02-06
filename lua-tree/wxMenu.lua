@@ -122,7 +122,7 @@ function wxMenu:initMenuList()
             end
         end
         menu:Destroy(titleId)
-    end
+end
 end
 
 return wxMenu

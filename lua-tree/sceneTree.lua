@@ -6,6 +6,7 @@ local wxFrame = require("stab.scripts.init.wxFrame")
 local wxTree = require("stab.scripts.init.wxTree")
 local wxMenu = require("stab.scripts.init.wxMenu")
 local wxNodePanel = require("stab.scripts.init.wxNodePanel")
+
 local  DEFAULT_WIDTH = 550
 local  DEFAULT_HEIGHT = 700
 local sceneTree = class("sceneTree")
@@ -43,7 +44,17 @@ function sceneTree:initializeFrame()
     self.scheduleId =  Schedule(function()        
         self:Tick()
     end,1/20)
+
+    --sys.taskInit(handler(self,self.TaskFunc),1/20 * 1000)
 end
+
+-- function sceneTree:TaskFunc(time) 
+--     while (true) do
+--         sys.wait(time)
+--         self:Tick()
+--     end
+-- end
+
 
 function sceneTree:createMenuBar()
     self.wxMenuBar = wxMenu.create({
@@ -95,17 +106,15 @@ function sceneTree:destroy()
     sceneTree.instance = nil 
 end
 
-
-
 function sceneTree:Tick()
-    if not self.pause then
+    if not self.pause then   
         if self.wxTreeFrame:getState() and self.wxTree then 
             local scenes = self:calculateTreeInfo()
             self.wxTree:wxRefreshTree(scenes) 
         end
         if self.wxNodeFrame:getState() then                      
             self.wxNodePanel:refreshNode()   
-        end        
+        end    
     end
 end
 
@@ -129,6 +138,10 @@ function sceneTree:calculateTreeInfo()
     end
     deepSearch({scene},self.input)
     return nodes
+end
+
+function sceneTree:Open()
+    self.wxFrame:Open()
 end
 
 sceneTree.instance = nil

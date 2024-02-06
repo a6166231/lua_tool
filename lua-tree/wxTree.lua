@@ -4,7 +4,7 @@ local  DEFAULT_WIDTH = 400
 local  DEFAULT_HEIGHT = 400
 local  DEFAULT_TITLE = "TREE_TITLE"
 local  DEFAULT_ROOT = "ROOT"
-
+local socket = require"socket"
 function wxTree.create(data)
     local tree = wxTree.new(data)
     if tree:initializeTree() then 
@@ -43,7 +43,7 @@ function wxTree:CreateTree(callback)
             local itemData = self.tree:GetItemData(e:GetItem())
             if itemData then
                 local data  = itemData:GetData()
-                self.chooseNode = data.node
+                self.chooseNode = data.itemData.node               
                 self.callBack(data)
             else
                 self.callBack(nil)
@@ -84,7 +84,6 @@ end
 function wxTree:initMapData()
     self.openMap = {}
     self.realMap = {}
-    self.eventMap = {}
     self.nodeMap= {}
     self.drawMap = {}
     self.drawMap.children = {}
@@ -98,6 +97,7 @@ end
 
 function wxTree:wxRefreshTree(scenes)
     self.virtualMap = {}
+   
     for i, scene in ipairs(scenes) do 
         scene.childIndex = i 
         self.virtualMap[scene] = {        
@@ -106,7 +106,7 @@ function wxTree:wxRefreshTree(scenes)
             children = {}
         }
     end
-    self:wxCalculateVirMap()
+    self:wxCalculateVirMap()    
     self:wxCalculateSortMap()
     self:wxRefreshTrunk()
 end
@@ -202,33 +202,43 @@ function wxTree:wxRefreshTrunk()
         end
     end
     drawTree(self.root,self.virSortMap,self.drawMap)
-    self:updateState()    
+    self:updateState()   
 end
 
-function wxTree:wxUpdateItem(root , data ,drawMap)
+
+function wxTree:wxUpdateItem(root , data ,drawMap)   
     local drawData = drawMap.children[data.node.childIndex]    
-    local itemData = nil 
-    if drawData then 
+    local itemData = nil
+    if drawData then
         itemData = drawData.itemData
-        if  data.node  == itemData.node then 
-            if data.name ~= itemData.name then 
-                self.tree:SetItemText(itemData.itemID , UTF8TowxString(data.name))
+        if  data.node  == itemData.node then
+            if data.name ~= itemData.name then
+                self.tree:SetItemText(itemData.itemID , UTF8TowxString(data.name))        
             end
         else
-            self.tree:Delete(itemData.itemID)
-            self.eventMap[itemData.itemID] = nil
             local treeData = {}
             local treeItemData = wx.wxLuaTreeItemData()
             treeItemData:SetData(treeData)
-            treeData.itemData = itemData             
-            itemData.itemID = self.tree:InsertItem(root,data.node.childIndex,UTF8TowxString(data.name),-1,-1,treeItemData)
-            drawData.children = {}
+            treeData.itemData = itemData
             drawData.itemData =treeData.itemData
+            self.tree:SetItemData(itemData.itemID,treeItemData)
+            self.openMap[itemData.node] = nil 
+            self.tree:Collapse(itemData.itemID)
+            
+            --self.openMap[data.node] = true
+            -- self.tree:Delete(itemData.itemID)
+            -- local treeData = {}
+            -- local treeItemData = wx.wxLuaTreeItemData()
+            -- treeItemData:SetData(treeData)
+            -- treeData.itemData = itemData          
+            -- itemData.itemID = self.tree:InsertItem(root,data.node.childIndex,UTF8TowxString(data.name),-1,-1,treeItemData)
+            -- drawData.children = {}
+            -- drawData.itemData =treeData.itemData
         end
     else
         local treeData = {}
         local treeItemData = wx.wxLuaTreeItemData()
-        treeItemData:SetData(treeData)
+        treeItemData:SetData(treeData)   
         itemData =  {           
             itemID = self.tree:AppendItem(root,data.name,-1,-1,treeItemData),
         }
@@ -242,7 +252,6 @@ function wxTree:wxUpdateItem(root , data ,drawMap)
     end
     itemData.node = data.node
     itemData.name = data.name
-    self.eventMap[itemData.itemID] = itemData 
     self.nodeMap[data.node] = itemData    
     return itemData.itemID
 end
@@ -258,12 +267,12 @@ function wxTree:updateState()
         end
     end
 
-    if self.chooseNode ~= self.chooseInfo.chooseNode then 
+    --if self.chooseNode ~= self.chooseInfo.chooseNode then 
         itemData = self.nodeMap[self.chooseInfo.chooseNode]
         if itemData then 
             self.tree:SelectItem(itemData.itemID,true)   
         end         
-    end       
+    --end       
     self.openstate = {}
 end
 
